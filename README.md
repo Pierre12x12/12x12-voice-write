@@ -31,7 +31,7 @@ Direkt-Download: [12x12-Voice-Write-Setup.exe](https://netzwerk12xx12.web.app/do
 ### Option 2 — Vom Source bauen
 
 ```bash
-git clone https://github.com/pierre-wagner/12x12-voice-write.git
+git clone https://github.com/Pierre12x12/12x12-voice-write.git
 cd 12x12-voice-write
 npm install
 npm start                    # Dev-Modus
