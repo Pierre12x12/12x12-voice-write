@@ -8,6 +8,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write    # required for softprops/action-gh-release to create the Release
+
 jobs:
   build-windows:
     runs-on: windows-latest
