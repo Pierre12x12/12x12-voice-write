@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <link rel="stylesheet" href="style.css">
+  <title>12x12 Voice Write</title>
+</head>
+<body>
+  <div id="app">
+    <button id="settings-btn" class="corner-btn" title="Settings">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+    <button id="close-btn" class="corner-btn" title="Hide">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="6" y1="12" x2="18" y2="12"/>
+      </svg>
+    </button>
+
+    <!-- KITT Scanner — the only visible element -->
+    <div id="scanner" title="F9">
+      <div id="scanner-track">
+        <div id="scanner-light"></div>
+      </div>
+    </div>
+
+    <!-- Hidden by default, only shown briefly on success/error -->
+    <div id="status"></div>
+    <div id="result"><div id="result-text"></div></div>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel">
+      <div id="settings-header">
+        <span>Settings</span>
+        <button id="settings-close" class="corner-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div id="settings-body">
+        <div class="field">
+          <label for="api-key">Groq API Key</label>
+          <input type="password" id="api-key" placeholder="gsk_..." spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="hotkey">Hotkey</label>
+          <select id="hotkey">
+            <option value="F9">F9 (empfohlen)</option>
+            <option value="F10">F10</option>
+            <option value="F12">F12</option>
+            <option value="Pause">Pause / Break</option>
+            <option value="ScrollLock">Scroll Lock</option>
+            <option value="CommandOrControl+Alt+V">Ctrl+Alt+V</option>
+            <option value="CommandOrControl+Alt+M">Ctrl+Alt+M</option>
+            <option value="CommandOrControl+Alt+R">Ctrl+Alt+R</option>
+            <option value="CommandOrControl+Alt+Space">Ctrl+Alt+Space</option>
+            <option value="CommandOrControl+Shift+;">Ctrl+Shift+;</option>
+            <option value="Control+num1">Ctrl+Numpad1 (NumLock!)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="language">Sprache</label>
+          <select id="language">
+            <option value="de">Deutsch</option>
+            <option value="en">English</option>
+            <option value="">Auto-detect</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="it">Italiano</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="llm-model">LLM Model</label>
+          <select id="llm-model">
+            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (empfohlen)</option>
+            <option value="llama-3.1-8b-instant">Llama 3.1 8B (schnellster)</option>
+            <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout</option>
+            <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick</option>
+            <option value="openai/gpt-oss-120b">GPT-OSS 120B</option>
+            <option value="openai/gpt-oss-20b">GPT-OSS 20B</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="whisper-model">Whisper</label>
+          <select id="whisper-model">
+            <option value="whisper-large-v3-turbo">Large v3 Turbo (schnellster)</option>
+            <option value="whisper-large-v3">Large v3 (präziser)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="llm-prompt">LLM Prompt</label>
+          <textarea id="llm-prompt" rows="3" spellcheck="false"></textarea>
+        </div>
+        <div class="field row">
+          <label class="check"><input type="checkbox" id="enhance-enabled"> KI-Korrektur</label>
+        </div>
+        <div class="field row">
+          <label class="check"><input type="checkbox" id="auto-paste"> Auto-Paste (sonst nur Clipboard)</label>
+        </div>
+        <div class="field row">
+          <label class="check"><input type="checkbox" id="auto-start"> Mit Windows starten</label>
+        </div>
+        <button id="save-btn">Speichern</button>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
