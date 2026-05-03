@@ -227,6 +227,10 @@ window.api.onUpdateStatus((info) => {
 
 // ---- Init ----
 (async () => {
+  // Tell the main process we're ready to receive IPC events
+  // (so hotkey presses during the load window aren't lost)
+  await window.api.rendererReady();
+
   const s = await window.api.getSettings();
   if (!s.apiKey) {
     setState('idle', STATUS.noKey);

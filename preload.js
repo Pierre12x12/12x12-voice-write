@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   openSettings: () => ipcRenderer.invoke('open-settings'),
   hideWindow: () => ipcRenderer.invoke('hide-window'),
   showWindow: () => ipcRenderer.invoke('show-window'),
+  rendererReady: () => ipcRenderer.invoke('renderer-ready'),
   resizeForSettings: (expand) => ipcRenderer.invoke('resize-for-settings', expand),
   resizeForResult: (expand) => ipcRenderer.invoke('resize-for-result', expand),
   onToggleRecording: (cb) => ipcRenderer.on('toggle-recording', cb),

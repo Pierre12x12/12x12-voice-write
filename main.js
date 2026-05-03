@@ -186,6 +186,10 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
+  // Reset renderer-ready state if the page reloads
+  mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; });
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => log('Page load failed', code, desc));
+
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
       e.preventDefault();
@@ -193,7 +197,7 @@ function createMainWindow() {
     }
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => { mainWindow = null; rendererReady = false; });
 }
 
 function showOverlay() {
@@ -222,14 +226,39 @@ function createTray() {
 }
 
 // --- Recording trigger ---
+let rendererReady = false;
+let pendingTrigger = false;
+
 function triggerRecording() {
-  if (!mainWindow) return;
+  if (!mainWindow) {
+    log('triggerRecording: no mainWindow');
+    return;
+  }
   showOverlay();
-  // tiny delay so the window is ready to receive the IPC
-  setTimeout(() => mainWindow.webContents.send('toggle-recording'), 30);
+
+  // If renderer hasn't signaled ready, queue the trigger and try when it does.
+  if (!rendererReady) {
+    log('triggerRecording: renderer not ready, queuing');
+    pendingTrigger = true;
+    return;
+  }
+
+  try {
+    mainWindow.webContents.send('toggle-recording');
+    log('triggerRecording: sent toggle-recording');
+  } catch (e) {
+    log('triggerRecording: send failed:', e.message);
+    // retry once after short delay
+    setTimeout(() => {
+      try { mainWindow?.webContents.send('toggle-recording'); }
+      catch (e2) { log('triggerRecording retry failed:', e2.message); }
+    }, 100);
+  }
 }
 
 // --- Hotkey ---
+let hotkeyHealthCheckInterval = null;
+
 function registerHotkey() {
   globalShortcut.unregisterAll();
   const primary = store.get('hotkey');
@@ -248,6 +277,18 @@ function registerHotkey() {
       log('Hotkey error', acc, e.message);
     }
   }
+
+  // Health check: every 30s verify the hotkey is still registered.
+  // Some apps / Windows can steal it temporarily; re-register if lost.
+  if (hotkeyHealthCheckInterval) clearInterval(hotkeyHealthCheckInterval);
+  hotkeyHealthCheckInterval = setInterval(() => {
+    if (!globalShortcut.isRegistered(primary)) {
+      log('Hotkey lost! Re-registering', primary);
+      for (const acc of candidates) {
+        try { globalShortcut.register(acc, triggerRecording); } catch {}
+      }
+    }
+  }, 30000);
 }
 
 // --- IPC ---
@@ -331,6 +372,18 @@ function setupIPC() {
   });
   ipcMain.handle('show-window', () => showOverlay());
   ipcMain.handle('open-external', (_e, url) => require('electron').shell.openExternal(url));
+
+  // Renderer signals it's ready to receive IPC events
+  ipcMain.handle('renderer-ready', () => {
+    rendererReady = true;
+    log('Renderer ready');
+    // Flush any pending hotkey-triggered recording
+    if (pendingTrigger) {
+      pendingTrigger = false;
+      log('Flushing pending trigger');
+      setTimeout(() => mainWindow?.webContents.send('toggle-recording'), 50);
+    }
+  });
   ipcMain.handle('resize-for-settings', (_e, expand) => {
     if (expand) mainWindow?.setSize(340, 600);
     else mainWindow?.setSize(260, 44);
