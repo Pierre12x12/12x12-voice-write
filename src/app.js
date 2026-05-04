@@ -196,20 +196,51 @@ $('#close-btn').addEventListener('click', () => window.api.hideWindow());
 window.api.onShowSettings(() => showSettings());
 
 // ---- Update notifications ----
-window.api.onUpdateAvailable((info) => {
-  resultText.innerHTML = `<span style="color:#34D399">● Update v${info.version}</span> – <a href="#" id="update-link" style="color:#60A5FA;text-decoration:underline">jetzt downloaden</a>`;
+let updateAutoHideTimer = null;
+function showUpdateBubble(html, persistent = false) {
+  resultText.innerHTML = html;
   resultEl.classList.add('visible');
   window.api.resizeForResult(true);
   window.api.showWindow();
-  document.getElementById('update-link')?.addEventListener('click', (e) => {
+  if (updateAutoHideTimer) { clearTimeout(updateAutoHideTimer); updateAutoHideTimer = null; }
+  if (!persistent) {
+    updateAutoHideTimer = setTimeout(() => {
+      resultEl.classList.remove('visible');
+      window.api.resizeForResult(false);
+    }, 15000);
+  }
+}
+
+window.api.onUpdateAvailable((info) => {
+  showUpdateBubble(
+    `<span style="color:#34D399">● Update v${info.version}</span> <a href="#" id="update-download-btn" style="color:#60A5FA;text-decoration:underline;margin-left:6px">Download</a>`,
+    true
+  );
+  document.getElementById('update-download-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
-    window.api.openExternal(info.url);
+    window.api.downloadUpdate();
+    showUpdateBubble(`<span style="color:#60A5FA">↓ Lade Update v${info.version}…</span> <span id="update-progress">0%</span>`, true);
   });
-  // Auto-hide after 15s
-  setTimeout(() => {
-    resultEl.classList.remove('visible');
-    window.api.resizeForResult(false);
-  }, 15000);
+});
+
+window.api.onUpdateDownloadProgress((p) => {
+  const el = document.getElementById('update-progress');
+  if (el) el.textContent = `${p.percent}%`;
+});
+
+window.api.onUpdateDownloaded((info) => {
+  showUpdateBubble(
+    `<span style="color:#34D399">✓ Update v${info.version} bereit</span> <a href="#" id="update-restart-btn" style="color:#60A5FA;text-decoration:underline;margin-left:6px">Jetzt neustarten</a>`,
+    true
+  );
+  document.getElementById('update-restart-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.api.installUpdate();
+  });
+});
+
+window.api.onUpdateError((info) => {
+  showUpdateBubble(`<span style="color:#F87171">⚠ Update-Fehler</span> <span style="color:#9CA3AF;font-size:11px">${info.message || ''}</span>`);
 });
 
 window.api.onUpdateStatus((info) => {
@@ -223,6 +254,12 @@ window.api.onUpdateStatus((info) => {
       window.api.resizeForResult(false);
     }, 3000);
   }
+});
+
+// ---- Heartbeat watchdog responder ----
+// Main pings every 30s; we pong back so it knows the renderer is alive.
+window.api.onHeartbeatPing(() => {
+  window.api.heartbeatPong();
 });
 
 // ---- Init ----

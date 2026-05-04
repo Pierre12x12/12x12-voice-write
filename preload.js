@@ -16,5 +16,13 @@ contextBridge.exposeInMainWorld('api', {
   onShowSettings: (cb) => ipcRenderer.on('show-settings', cb),
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, info) => cb(info)),
   onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, info) => cb(info)),
+  onUpdateDownloadProgress: (cb) => ipcRenderer.on('update-download-progress', (_e, info) => cb(info)),
+  onUpdateDownloaded: (cb) => ipcRenderer.on('update-downloaded', (_e, info) => cb(info)),
+  onUpdateError: (cb) => ipcRenderer.on('update-error', (_e, info) => cb(info)),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  checkForUpdates: (silent) => ipcRenderer.invoke('check-for-updates', silent),
+  heartbeatPong: () => ipcRenderer.invoke('heartbeat-pong'),
+  onHeartbeatPing: (cb) => ipcRenderer.on('heartbeat-ping', cb),
   openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

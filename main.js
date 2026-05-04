@@ -41,6 +41,9 @@ function log(...args) {
 let store, autoLauncher;
 let mainWindow = null;
 let tray = null;
+let lastHeartbeatPong = Date.now();
+let heartbeatInterval = null;
+let unresponsiveTimer = null;
 
 function initStore() {
   const Store = require('electron-store');
@@ -184,11 +187,40 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Reset renderer-ready state if the page reloads
-  mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; });
+  // Reset renderer-ready + heartbeat state if the page reloads
+  mainWindow.webContents.on('did-start-loading', () => {
+    rendererReady = false;
+    lastHeartbeatPong = Date.now(); // pause watchdog during reload
+  });
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => log('Page load failed', code, desc));
+
+  // Auto-recover from renderer crash
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    log('Renderer process gone:', details.reason);
+    if (details.reason !== 'clean-exit' && mainWindow && !mainWindow.isDestroyed()) {
+      log('Reloading renderer after crash');
+      try { mainWindow.reload(); } catch (e) { log('Reload after crash failed:', e.message); }
+    }
+  });
+
+  // Auto-recover from renderer hang
+  mainWindow.on('unresponsive', () => {
+    log('Renderer unresponsive');
+    if (unresponsiveTimer) clearTimeout(unresponsiveTimer);
+    unresponsiveTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        log('Renderer still unresponsive after 5s, reloading');
+        try { mainWindow.reload(); } catch (e) { log('Reload after hang failed:', e.message); }
+      }
+    }, 5000);
+  });
+  mainWindow.on('responsive', () => {
+    log('Renderer responsive again');
+    if (unresponsiveTimer) { clearTimeout(unresponsiveTimer); unresponsiveTimer = null; }
+  });
 
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
@@ -201,8 +233,31 @@ function createMainWindow() {
 }
 
 function showOverlay() {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  // Sanity-check position: if window drifted off all displays (monitor unplugged,
+  // resolution change, DPI change), recenter on primary so the user can see it.
+  const b = mainWindow.getBounds();
+  const cx = b.x + b.width / 2;
+  const cy = b.y + b.height / 2;
+  const onScreen = screen.getAllDisplays().some(d =>
+    cx >= d.workArea.x && cx <= d.workArea.x + d.workArea.width &&
+    cy >= d.workArea.y && cy <= d.workArea.y + d.workArea.height
+  );
+  if (!onScreen) {
+    const primary = screen.getPrimaryDisplay();
+    const { width, height } = primary.workAreaSize;
+    mainWindow.setBounds({
+      x: primary.workArea.x + Math.round((width - 260) / 2),
+      y: primary.workArea.y + height - 84,
+      width: 260,
+      height: 44
+    });
+    log('Window was off-screen, recentered to primary display');
+  }
+
   if (!mainWindow.isVisible()) mainWindow.showInactive();   // no focus steal
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
 }
 
 // --- Tray ---
@@ -212,8 +267,15 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Start / Stop Recording', click: () => triggerRecording() },
+    { label: 'Fenster zeigen', click: () => showOverlay() },
+    { type: 'separator' },
     { label: 'Settings', click: () => { showOverlay(); mainWindow?.webContents.send('show-settings'); } },
     { label: 'Auf Updates prüfen', click: () => checkForUpdates(false) },
+    { label: 'Renderer neu laden', click: () => {
+        try { mainWindow?.reload(); log('Manual renderer reload from tray'); }
+        catch (e) { log('Manual reload failed:', e.message); }
+      }
+    },
     { type: 'separator' },
     { label: 'Toggle DevTools (debug)', click: () => mainWindow?.webContents.toggleDevTools({ mode: 'detach' }) },
     { type: 'separator' },
@@ -288,6 +350,30 @@ function registerHotkey() {
         try { globalShortcut.register(acc, triggerRecording); } catch {}
       }
     }
+  }, 30000);
+}
+
+// --- Renderer health watchdog ---
+// Sends a ping every 30s; renderer pongs back. If we don't hear a pong
+// for >90s, the renderer is hung and we reload it.
+function startHeartbeatWatchdog() {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  lastHeartbeatPong = Date.now();
+  heartbeatInterval = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const since = Date.now() - lastHeartbeatPong;
+    if (since > 90000) {
+      log('Heartbeat watchdog: no pong for', since, 'ms - reloading renderer');
+      try {
+        mainWindow.reload();
+        lastHeartbeatPong = Date.now(); // reset cooldown so we don't immediately re-trigger
+      } catch (e) {
+        log('Watchdog reload failed:', e.message);
+      }
+      return;
+    }
+    try { mainWindow.webContents.send('heartbeat-ping'); }
+    catch (e) { log('Heartbeat ping failed:', e.message); }
   }, 30000);
 }
 
@@ -376,6 +462,7 @@ function setupIPC() {
   // Renderer signals it's ready to receive IPC events
   ipcMain.handle('renderer-ready', () => {
     rendererReady = true;
+    lastHeartbeatPong = Date.now();
     log('Renderer ready');
     // Flush any pending hotkey-triggered recording
     if (pendingTrigger) {
@@ -383,6 +470,11 @@ function setupIPC() {
       log('Flushing pending trigger');
       setTimeout(() => mainWindow?.webContents.send('toggle-recording'), 50);
     }
+  });
+
+  // Renderer responds to watchdog ping
+  ipcMain.handle('heartbeat-pong', () => {
+    lastHeartbeatPong = Date.now();
   });
   ipcMain.handle('resize-for-settings', (_e, expand) => {
     if (expand) mainWindow?.setSize(340, 600);
@@ -392,6 +484,10 @@ function setupIPC() {
     if (expand) mainWindow?.setSize(260, 110);
     else mainWindow?.setSize(260, 44);
   });
+
+  ipcMain.handle('download-update', () => startUpdateDownload());
+  ipcMain.handle('install-update', () => quitAndInstallUpdate());
+  ipcMain.handle('check-for-updates', (_e, silent) => checkForUpdates(silent !== false));
 }
 
 // --- Second instance handler ---
@@ -403,57 +499,82 @@ app.on('second-instance', () => {
   }
 });
 
-// --- Update Check ---
-// Polls a JSON file on 12x12 hosting and shows a notification if a newer version exists.
-// JSON format: {"version": "1.0.1", "url": "https://.../12x12-Voice-Write-Setup-1.0.1.exe", "notes": "..."}
-const UPDATE_MANIFEST_URL = 'https://netzwerk12xx12.web.app/downloads/voicewrite-latest.json';
+// --- Auto-Updater ---
+// Uses electron-updater to fetch releases from GitHub.
+// Flow: app start -> check -> notify renderer -> user clicks Download
+//       -> download with progress -> notify ready -> user clicks Restart -> install.
+const { autoUpdater } = require('electron-updater');
+let lastUpdateCheckSilent = true;
 
-function compareVersions(a, b) {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0, y = pb[i] || 0;
-    if (x > y) return 1;
-    if (x < y) return -1;
+autoUpdater.autoDownload = false;        // wait for user click
+autoUpdater.autoInstallOnAppQuit = false; // we trigger install ourselves
+autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
+
+autoUpdater.on('checking-for-update', () => {
+  log('autoUpdater: checking for update');
+});
+autoUpdater.on('update-available', (info) => {
+  log('autoUpdater: update available', info.version);
+  mainWindow?.webContents.send('update-available', {
+    version: info.version,
+    notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : ''
+  });
+});
+autoUpdater.on('update-not-available', (info) => {
+  log('autoUpdater: up to date', info.version);
+  if (!lastUpdateCheckSilent) {
+    mainWindow?.webContents.send('update-status', { upToDate: true, version: info.version });
   }
-  return 0;
-}
+});
+autoUpdater.on('error', (err) => {
+  log('autoUpdater error:', err?.message || String(err));
+  mainWindow?.webContents.send('update-error', { message: err?.message || 'Unknown error' });
+});
+autoUpdater.on('download-progress', (p) => {
+  mainWindow?.webContents.send('update-download-progress', {
+    percent: Math.round(p.percent),
+    bytesPerSecond: p.bytesPerSecond,
+    transferred: p.transferred,
+    total: p.total
+  });
+});
+autoUpdater.on('update-downloaded', (info) => {
+  log('autoUpdater: update downloaded', info.version);
+  mainWindow?.webContents.send('update-downloaded', { version: info.version });
+});
 
 function checkForUpdates(silent = true) {
-  return new Promise((resolve) => {
-    https.get(UPDATE_MANIFEST_URL, (res) => {
-      let body = '';
-      res.on('data', (c) => body += c);
-      res.on('end', () => {
-        try {
-          const manifest = JSON.parse(body);
-          const current = app.getVersion();
-          const latest = manifest.version;
-          log('Update check: current', current, 'latest', latest);
-          if (compareVersions(latest, current) > 0) {
-            log('Update available:', latest);
-            mainWindow?.webContents.send('update-available', {
-              version: latest,
-              url: manifest.url,
-              notes: manifest.notes || ''
-            });
-            resolve({ available: true });
-          } else {
-            if (!silent) {
-              mainWindow?.webContents.send('update-status', { upToDate: true, version: current });
-            }
-            resolve({ available: false });
-          }
-        } catch (e) {
-          log('Update check parse error:', e.message);
-          resolve({ error: e.message });
-        }
-      });
-    }).on('error', (e) => {
-      log('Update check failed:', e.message);
-      resolve({ error: e.message });
-    });
+  lastUpdateCheckSilent = silent;
+  if (!app.isPackaged) {
+    log('checkForUpdates skipped: app not packaged (dev mode)');
+    if (!silent) {
+      mainWindow?.webContents.send('update-status', { upToDate: true, version: app.getVersion() });
+    }
+    return Promise.resolve({ available: false, dev: true });
+  }
+  return autoUpdater.checkForUpdates().catch((e) => {
+    log('checkForUpdates failed:', e.message);
+    return { error: e.message };
   });
+}
+
+function startUpdateDownload() {
+  if (!app.isPackaged) {
+    log('startUpdateDownload skipped: dev mode');
+    return;
+  }
+  log('Starting update download');
+  autoUpdater.downloadUpdate().catch((e) => {
+    log('downloadUpdate failed:', e.message);
+    mainWindow?.webContents.send('update-error', { message: e.message });
+  });
+}
+
+function quitAndInstallUpdate() {
+  log('Quitting and installing update');
+  app.isQuitting = true;
+  // isSilent=false (show installer), isForceRunAfter=true (relaunch after install)
+  setImmediate(() => autoUpdater.quitAndInstall(false, true));
 }
 
 // --- Lifecycle ---
@@ -478,6 +599,7 @@ app.whenReady().then(() => {
   createTray();
   registerHotkey();
   setupIPC();
+  startHeartbeatWatchdog();
 
   // If no API key set, show overlay so user can configure
   if (!store.get('apiKey')) {

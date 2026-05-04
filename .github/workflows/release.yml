@@ -48,6 +48,7 @@ jobs:
           files: |
             dist/*.exe
             dist/*.exe.blockmap
+            dist/latest.yml
           draft: false
           prerelease: false
           generate_release_notes: true
